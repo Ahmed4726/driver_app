@@ -158,8 +158,18 @@ class _TripsPageState extends State<TripsPage> {
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: FilledButton.icon(
-                                        onPressed: status.toLowerCase() == 'started' ? null : () {
-                                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip started.')));
+                                        onPressed: status.toLowerCase() == 'started' ? null : () async {
+                                          try {
+                                            await DioClient.dio.post('/driver-trips/${trip['id']}/start');
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip started.')));
+                                              await _loadTrips();
+                                            }
+                                          } catch (_) {
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to start trip.')));
+                                            }
+                                          }
                                         },
                                         icon: const Icon(Icons.play_arrow),
                                         label: const Text('Start'),

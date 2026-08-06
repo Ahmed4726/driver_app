@@ -247,6 +247,26 @@ class _TripDetailPageState extends State<TripDetailPage> {
     }
   }
 
+  Future<void> _startTrip() async {
+    setState(() => saving = true);
+    try {
+      await DioClient.dio.post('/driver-trips/${widget.tripId}/start');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip started.')));
+        await _loadTrip();
+      }
+    } catch (e) {
+      final message = _extractErrorMessage(e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => saving = false);
+      }
+    }
+  }
+
   int _totalEtaMinutes() {
     final points = stops.where((stop) => stop['latitude'] != null && stop['longitude'] != null).toList();
     if (points.length < 2) return 0;
@@ -385,6 +405,14 @@ class _TripDetailPageState extends State<TripDetailPage> {
                         const SizedBox(height: 8),
                         Row(
                           children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: saving || (trip?['status']?.toString() == 'started') ? null : _startTrip,
+                                icon: const Icon(Icons.play_arrow),
+                                label: const Text('Start trip'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: TextField(
                                 controller: seatsController,
