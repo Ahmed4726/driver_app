@@ -32,6 +32,8 @@
 	<string>Photo library access is required.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Photo library access is required to upload your documents.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Location access is required to track live driver movement.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
