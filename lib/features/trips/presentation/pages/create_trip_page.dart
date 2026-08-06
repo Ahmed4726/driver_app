@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -64,6 +65,8 @@ class _CreateTripFormState extends State<CreateTripForm> {
   final seatsController = TextEditingController();
   bool loading = false;
   bool citiesLoading = false;
+  String? formError;
+  String? seatsError;
 
   @override
   void initState() {
@@ -77,9 +80,10 @@ class _CreateTripFormState extends State<CreateTripForm> {
     setState(() {
       currentVehicle = vehicle;
       if (vehicle != null) {
-        final maxSeats = vehicle.availableSeats > 0 ? vehicle.availableSeats : 1;
+        final isApprovedVehicle = vehicle.status.toLowerCase() == 'approved';
+        final maxSeats = isApprovedVehicle && vehicle.availableSeats > 0 ? vehicle.availableSeats : 1;
         final currentValue = int.tryParse(seatsController.text) ?? 0;
-        if (currentValue < 1 || currentValue > maxSeats) {
+        if (currentValue < 1 || (isApprovedVehicle && currentValue > maxSeats)) {
           seatsController.text = maxSeats.toString();
         }
       }
@@ -276,17 +280,58 @@ class _CreateTripFormState extends State<CreateTripForm> {
     }
   }
 
+  void _setFormError({String? formMessage, String? seatMessage}) {
+    setState(() {
+      formError = formMessage;
+      seatsError = seatMessage;
+    });
+  }
+
+  String _extractErrorMessage(dynamic error) {
+    if (error is DioException) {
+      final data = error.response?.data;
+      if (data is Map<String, dynamic>) {
+        if (data['message'] is String && (data['message'] as String).trim().isNotEmpty) {
+          return data['message'].toString();
+        }
+        if (data['error'] is String && (data['error'] as String).trim().isNotEmpty) {
+          return data['error'].toString();
+        }
+      }
+      if (error.response?.statusCode == 422) {
+        return 'Please review the trip details and try again.';
+      }
+    }
+
+    if (error is Exception) {
+      return error.toString().replaceFirst('Exception: ', '');
+    }
+
+    return 'Unable to create trip right now.';
+  }
+
   Future<void> _submit() async {
+    _setFormError(formMessage: null, seatMessage: null);
+
     if (currentVehicle == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please register a vehicle before creating a trip.')));
+      _setFormError(formMessage: 'Please register a vehicle before creating a trip.', seatMessage: null);
       return;
     }
 
-    final maxSeats = currentVehicle!.availableSeats > 0 ? currentVehicle!.availableSeats : 1;
+    final isApprovedVehicle = currentVehicle!.status.toLowerCase() == 'approved';
+    final maxSeats = isApprovedVehicle && currentVehicle!.availableSeats > 0 ? currentVehicle!.availableSeats : 1;
     final requestedSeats = int.tryParse(seatsController.text) ?? 0;
 
-    if (requestedSeats < 1 || requestedSeats > maxSeats) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Seats must be a number between 1 and $maxSeats for this vehicle.')));
+    if (requestedSeats < 1) {
+      _setFormError(formMessage: 'Seats must be at least 1.', seatMessage: 'Seats must be at least 1.');
+      return;
+    }
+
+    if (isApprovedVehicle && requestedSeats > maxSeats) {
+      _setFormError(
+        formMessage: 'Seats cannot exceed $maxSeats for this approved vehicle.',
+        seatMessage: 'Seats cannot exceed $maxSeats for this approved vehicle.',
+      );
       return;
     }
 
@@ -311,7 +356,10 @@ class _CreateTripFormState extends State<CreateTripForm> {
     try {
       final resp = await DioClient.dio.post('/driver-trips', data: payload);
       if (resp.data['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip created.')));
+        _setFormError(formMessage: null, seatMessage: null);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip created.')));
+        }
         if (widget.onBackToTrips != null) {
           widget.onBackToTrips!();
         } else if (context.mounted) {
@@ -319,9 +367,15 @@ class _CreateTripFormState extends State<CreateTripForm> {
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${e.toString()}')));
+      final message = _extractErrorMessage(e);
+      _setFormError(formMessage: message, seatMessage: null);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.red));
+      }
     } finally {
-      setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 
@@ -471,11 +525,27 @@ class _CreateTripFormState extends State<CreateTripForm> {
             decoration: InputDecoration(
               hintText: 'Enter seats',
               border: const OutlineInputBorder(),
+              errorText: seatsError,
               helperText: currentVehicle != null
-                  ? 'Available for this vehicle: ${currentVehicle!.availableSeats}'
+                  ? (currentVehicle!.status.toLowerCase() == 'approved'
+                      ? 'Approved vehicle capacity: ${currentVehicle!.availableSeats}'
+                      : 'Seat count must be at least 1')
                   : 'Vehicle capacity unavailable',
             ),
           ),
+          if (formError != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Text(formError!, style: const TextStyle(color: Colors.red)),
+            ),
+          ],
           const SizedBox(height: 20),
           FilledButton(
             onPressed: loading ? null : _submit,

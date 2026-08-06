@@ -4,6 +4,7 @@ import '../../../../core/api/dio_client.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../trips/presentation/pages/create_trip_page.dart';
+import '../../../trips/presentation/pages/trip_detail_page.dart';
 
 enum TripPageMode { list, create }
 
@@ -82,29 +83,38 @@ class _TripsPageState extends State<TripsPage> {
           ),
         ),
         Expanded(
-          child: loading
-              ? const Center(child: CircularProgressIndicator())
-              : trips.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
+          child: RefreshIndicator(
+            onRefresh: _loadTrips,
+            child: loading
+                ? const Center(child: CircularProgressIndicator())
+                : trips.isEmpty
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
                         children: [
-                          Text(
-                            'Trips will appear here once you start driving.',
-                            style: AppTextStyles.subtitle.copyWith(color: AppColors.textSecondary),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
-                          FilledButton.icon(
-                            onPressed: _showCreateForm,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Create Trip'),
+                          const SizedBox(height: 80),
+                          Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Trips will appear here once you start driving.',
+                                  style: AppTextStyles.subtitle.copyWith(color: AppColors.textSecondary),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 16),
+                                FilledButton.icon(
+                                  onPressed: _showCreateForm,
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Create Trip'),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
-                      ),
-                    )
-                  : ListView.separated(
+                      )
+                    : ListView.separated(
                       padding: const EdgeInsets.all(16),
+                      physics: const AlwaysScrollableScrollPhysics(),
                       itemCount: trips.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, index) {
@@ -135,7 +145,11 @@ class _TripsPageState extends State<TripsPage> {
                                     Expanded(
                                       child: OutlinedButton.icon(
                                         onPressed: () {
-                                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip details coming soon.')));
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) => TripDetailPage(tripId: trip['id'] is int ? trip['id'] as int : 0),
+                                            ),
+                                          );
                                         },
                                         icon: const Icon(Icons.visibility_outlined),
                                         label: const Text('View'),
@@ -193,6 +207,7 @@ class _TripsPageState extends State<TripsPage> {
                         );
                       },
                     ),
+          ),
         ),
       ],
     );

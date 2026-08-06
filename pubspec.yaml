@@ -79,6 +79,8 @@ dependencies:
 
   # Location
   geolocator: ^14.0.2
+  flutter_map: ^8.3.1
+  latlong2: ^0.10.1
 
   # Maps (for later)
   # google_maps_flutter: ^2.12.3
