@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../../core/api/dio_client.dart';
@@ -26,7 +29,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
   List<Map<String, dynamic>> availableStopsToAdd = [];
   bool loadingAvailableStops = false;
   int? selectedStopToAddId;
+  LatLng? driverLocation;
+  StreamSubscription<Position>? _locationSubscription;
   final seatsController = TextEditingController();
+  final MapController _mapController = MapController();
 
   @override
   void initState() {
@@ -36,6 +42,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
 
   @override
   void dispose() {
+    _locationSubscription?.cancel();
     seatsController.dispose();
     super.dispose();
   }
@@ -55,10 +62,17 @@ class _TripDetailPageState extends State<TripDetailPage> {
             }
           }
         }
+        final latestLocation = payload['latest_location'];
         setState(() {
           trip = payload;
           stops = parsedStops;
           seatsController.text = (payload['total_seats'] ?? payload['available_seats'] ?? '').toString();
+          if (latestLocation is Map && latestLocation['latitude'] != null && latestLocation['longitude'] != null) {
+            driverLocation = LatLng(
+              (latestLocation['latitude'] as num).toDouble(),
+              (latestLocation['longitude'] as num).toDouble(),
+            );
+          }
         });
       }
     } catch (_) {
@@ -67,7 +81,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
         stops = [];
       });
     } finally {
-      setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
+      _maybeStartLiveTrackingIfNeeded();
     }
   }
 
@@ -247,12 +264,92 @@ class _TripDetailPageState extends State<TripDetailPage> {
     }
   }
 
+  Future<void> _sendCurrentLocation(double latitude, double longitude) async {
+    try {
+      await DioClient.dio.post('/driver-trips/${widget.tripId}/locations', data: {
+        'latitude': latitude,
+        'longitude': longitude,
+      });
+    } catch (_) {
+      // Ignore location sync failures while the trip is moving; the next poll will recover.
+    }
+  }
+
+  Future<void> _maybeStartLiveTrackingIfNeeded() async {
+    if (!mounted || trip?['status']?.toString() != 'started') {
+      _locationSubscription?.cancel();
+      _locationSubscription = null;
+      return;
+    }
+
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        return;
+      }
+
+      final current = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      if (!mounted) return;
+      setState(() => driverLocation = LatLng(current.latitude, current.longitude));
+      await _sendCurrentLocation(current.latitude, current.longitude);
+
+      if (_locationSubscription != null) {
+        return;
+      }
+
+      _locationSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 15,
+        ),
+      ).listen((position) async {
+        if (!mounted || trip?['status']?.toString() != 'started') {
+          return;
+        }
+
+        final nextLocation = LatLng(position.latitude, position.longitude);
+        if (mounted) {
+          setState(() => driverLocation = nextLocation);
+        }
+        await _sendCurrentLocation(position.latitude, position.longitude);
+      });
+    } catch (_) {
+      // Ignore tracking setup errors and allow the user to retry once the trip is active.
+    }
+  }
+
   Future<void> _startTrip() async {
     setState(() => saving = true);
     try {
-      await DioClient.dio.post('/driver-trips/${widget.tripId}/start');
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission is required to start a trip.');
+      }
+
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        throw Exception('Turn on device location to start the trip.');
+      }
+
+      final current = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      await DioClient.dio.post('/driver-trips/${widget.tripId}/start', data: {
+        'latitude': current.latitude,
+        'longitude': current.longitude,
+      });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip started.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip started from your current location.')));
         await _loadTrip();
       }
     } catch (e) {
@@ -311,14 +408,16 @@ class _TripDetailPageState extends State<TripDetailPage> {
   }
 
   List<Marker> _markers() {
-    return stops.where((stop) {
+    final markers = <Marker>[];
+
+    for (final stop in stops.where((stop) {
       final lat = stop['latitude'];
       final lng = stop['longitude'];
       return lat != null && lng != null;
-    }).map((stop) {
+    })) {
       final lat = (stop['latitude'] as num).toDouble();
       final lng = (stop['longitude'] as num).toDouble();
-      return Marker(
+      markers.add(Marker(
         point: LatLng(lat, lng),
         width: 40,
         height: 40,
@@ -330,8 +429,34 @@ class _TripDetailPageState extends State<TripDetailPage> {
           ),
           child: const Icon(Icons.location_on, color: Colors.white, size: 20),
         ),
-      );
-    }).toList();
+      ));
+    }
+
+    if (driverLocation != null) {
+      markers.add(Marker(
+        point: driverLocation!,
+        width: 40,
+        height: 40,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.green,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+          ),
+          child: const Icon(Icons.directions_car, color: Colors.white, size: 18),
+        ),
+      ));
+    }
+
+    return markers;
+  }
+
+  List<LatLng> _routePoints() {
+    return stops.where((stop) {
+      final lat = stop['latitude'];
+      final lng = stop['longitude'];
+      return lat != null && lng != null;
+    }).map((stop) => LatLng((stop['latitude'] as num).toDouble(), (stop['longitude'] as num).toDouble())).toList();
   }
 
   LatLng? _center() {
@@ -353,12 +478,34 @@ class _TripDetailPageState extends State<TripDetailPage> {
   Widget build(BuildContext context) {
     final center = _center();
     final etaList = _etaList();
+    final routePoints = _routePoints();
+    final isTripLive = trip?['status']?.toString() == 'started';
+
+    if (isTripLive && driverLocation != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _mapController.move(driverLocation!, 13);
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: Text(trip?['from_city_name'] != null && trip?['to_city_name'] != null
             ? '${trip!['from_city_name']} → ${trip!['to_city_name']}'
             : 'Trip details'),
+        actions: isTripLive
+            ? [
+                const Padding(
+                  padding: EdgeInsets.only(right: 12),
+                  child: Center(
+                    child: Chip(
+                      label: Text('Live'),
+                      backgroundColor: Colors.green,
+                      labelStyle: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ]
+            : null,
         backgroundColor: AppColors.primary,
       ),
       body: loading
@@ -379,12 +526,22 @@ class _TripDetailPageState extends State<TripDetailPage> {
                     child: center == null
                         ? const Center(child: Text('No map coordinates available'))
                         : FlutterMap(
-                            options: MapOptions(initialCenter: center, initialZoom: 10),
+                            mapController: _mapController,
+                            options: MapOptions(
+                              initialCenter: center ?? const LatLng(24.8607, 67.0011),
+                              initialZoom: 10,
+                            ),
                             children: [
                               TileLayer(
                                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                                 userAgentPackageName: 'com.example.driver_app',
                               ),
+                              if (routePoints.length > 1)
+                                PolylineLayer(
+                                  polylines: [
+                                    Polyline(points: routePoints, color: AppColors.primary, strokeWidth: 4),
+                                  ],
+                                ),
                               MarkerLayer(markers: _markers()),
                             ],
                           ),
@@ -402,6 +559,13 @@ class _TripDetailPageState extends State<TripDetailPage> {
                         Text('Trip simulator', style: AppTextStyles.subtitle),
                         const SizedBox(height: 8),
                         Text('Total ETA: ${_totalEtaMinutes()} min', style: AppTextStyles.body),
+                        if (driverLocation != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Driver location: ${driverLocation!.latitude.toStringAsFixed(5)}, ${driverLocation!.longitude.toStringAsFixed(5)}',
+                            style: AppTextStyles.body,
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         Row(
                           children: [
