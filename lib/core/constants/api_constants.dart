@@ -2,10 +2,7 @@ import 'dart:io' show Platform;
 
 class ApiConstants {
   static String get baseUrl {
-    if (Platform.isAndroid) {
-      return 'http://10.0.2.2:8000/api';
-    }
-    return 'http://localhost:8000/api';
+    return 'http://api.booksdada.com/api';
   }
 
   static const String login = '/auth/login';
