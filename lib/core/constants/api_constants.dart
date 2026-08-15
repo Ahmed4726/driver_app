@@ -2,7 +2,7 @@ import 'dart:io' show Platform;
 
 class ApiConstants {
   static String get baseUrl {
-    return 'http://api.booksdada.com/api';
+    return 'https://api.booksdada.com/api';
   }
 
   static const String login = '/auth/login';
