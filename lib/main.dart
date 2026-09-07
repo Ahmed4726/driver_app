@@ -21,7 +21,7 @@ Future<void> main() async {
 
   // ⚠️ TESTING ONLY:
   // Accepts invalid/self-signed SSL certificates.
-  HttpOverrides.global = MyHttpOverrides();
+  // HttpOverrides.global = MyHttpOverrides();
 
   await initDependencies();
 

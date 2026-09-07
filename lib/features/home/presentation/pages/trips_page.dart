@@ -9,7 +9,11 @@ import '../../../trips/presentation/pages/trip_detail_page.dart';
 enum TripPageMode { list, create }
 
 class TripsPage extends StatefulWidget {
-  const TripsPage({super.key, this.initialMode = TripPageMode.list, this.onBackToTrips});
+  const TripsPage({
+    super.key,
+    this.initialMode = TripPageMode.list,
+    this.onBackToTrips,
+  });
 
   final TripPageMode initialMode;
   final VoidCallback? onBackToTrips;
@@ -21,6 +25,8 @@ class TripsPage extends StatefulWidget {
 class _TripsPageState extends State<TripsPage> {
   bool loading = false;
   List<dynamic> trips = [];
+  String? loadError;
+  int selectedHistory = 0;
   late TripPageMode mode;
 
   @override
@@ -30,16 +36,30 @@ class _TripsPageState extends State<TripsPage> {
     _loadTrips();
   }
 
+  String get _statusFilter =>
+      const ['scheduled', 'started', 'completed'][selectedHistory];
+
   Future<void> _loadTrips() async {
     setState(() => loading = true);
     try {
-      final resp = await DioClient.dio.get('/driver-trips');
+      final resp = await DioClient.dio.get(
+        '/driver-trips',
+        queryParameters: {'status': _statusFilter},
+      );
       final data = resp.data['data'] ?? [];
-      setState(() => trips = data is List ? List<dynamic>.from(data) : []);
+      if (!mounted) return;
+      setState(() {
+        trips = data is List ? List<dynamic>.from(data) : [];
+        loadError = null;
+      });
     } catch (_) {
-      setState(() => trips = []);
+      if (!mounted) return;
+      setState(() {
+        trips = [];
+        loadError = 'Unable to load trips. Please try again.';
+      });
     } finally {
-      setState(() => loading = false);
+      if (mounted) setState(() => loading = false);
     }
   }
 
@@ -47,12 +67,16 @@ class _TripsPageState extends State<TripsPage> {
     try {
       await DioClient.dio.delete('/driver-trips/$tripId');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip deleted.')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Trip deleted.')));
         await _loadTrips();
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to delete trip.')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to delete trip.')));
       }
     }
   }
@@ -74,12 +98,24 @@ class _TripsPageState extends State<TripsPage> {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  'Your trips',
-                  style: AppTextStyles.subtitle,
-                ),
+                child: Text('Your trips', style: AppTextStyles.subtitle),
               ),
             ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Upcoming')),
+              ButtonSegment(value: 1, label: Text('Current')),
+              ButtonSegment(value: 2, label: Text('Completed')),
+            ],
+            selected: {selectedHistory},
+            onSelectionChanged: (selection) {
+              setState(() => selectedHistory = selection.first);
+              _loadTrips();
+            },
           ),
         ),
         Expanded(
@@ -87,139 +123,235 @@ class _TripsPageState extends State<TripsPage> {
             onRefresh: _loadTrips,
             child: loading
                 ? const Center(child: CircularProgressIndicator())
+                : loadError != null
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      const SizedBox(height: 80),
+                      Center(
+                        child: Text(loadError!, style: AppTextStyles.subtitle),
+                      ),
+                      const SizedBox(height: 16),
+                      Center(
+                        child: OutlinedButton.icon(
+                          onPressed: _loadTrips,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry'),
+                        ),
+                      ),
+                    ],
+                  )
                 : trips.isEmpty
-                    ? ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        children: [
-                          const SizedBox(height: 80),
-                          Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'Trips will appear here once you start driving.',
-                                  style: AppTextStyles.subtitle.copyWith(color: AppColors.textSecondary),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 16),
-                                FilledButton.icon(
-                                  onPressed: _showCreateForm,
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('Create Trip'),
-                                ),
-                              ],
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      const SizedBox(height: 80),
+                      Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Trips will appear here once you start driving.',
+                              style: AppTextStyles.subtitle.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                              textAlign: TextAlign.center,
                             ),
-                          ),
-                        ],
-                      )
-                    : ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      itemCount: trips.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final trip = trips[index] as Map<String, dynamic>;
-                        final status = trip['status']?.toString() ?? 'scheduled';
+                            const SizedBox(height: 16),
+                            FilledButton.icon(
+                              onPressed: _showCreateForm,
+                              icon: const Icon(Icons.add),
+                              label: const Text('Create Trip'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    itemCount: trips.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final trip = trips[index] as Map<String, dynamic>;
+                      final status = trip['status']?.toString() ?? 'scheduled';
 
-                        return Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  [trip['from_city_name'] ?? '', trip['to_city_name'] ?? '']
-                                      .where((value) => value.toString().isNotEmpty)
-                                      .join(' → '),
-                                  style: AppTextStyles.subtitle,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 8),
-                                Text('Stops: ${trip['stop_count'] ?? trip['stops_count'] ?? '-'}', style: AppTextStyles.body),
-                                const SizedBox(height: 6),
-                                Text('Available seats: ${trip['total_seats'] ?? trip['available_seats'] ?? '-'}', style: AppTextStyles.body),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        onPressed: () {
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute(
-                                              builder: (_) => TripDetailPage(tripId: trip['id'] is int ? trip['id'] as int : 0),
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                [
+                                      trip['from_city_name'] ?? '',
+                                      trip['to_city_name'] ?? '',
+                                    ]
+                                    .where(
+                                      (value) => value.toString().isNotEmpty,
+                                    )
+                                    .join(' → '),
+                                style: AppTextStyles.subtitle,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Stops: ${trip['stop_count'] ?? trip['stops_count'] ?? '-'}',
+                                style: AppTextStyles.body,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Status: ${_statusLabel(status)}',
+                                style: AppTextStyles.body,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Total capacity: ${trip['total_seats'] ?? '-'}',
+                                style: AppTextStyles.body,
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => TripDetailPage(
+                                              tripId: trip['id'] is int
+                                                  ? trip['id'] as int
+                                                  : 0,
                                             ),
-                                          );
-                                        },
-                                        icon: const Icon(Icons.visibility_outlined),
-                                        label: const Text('View'),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(
+                                        Icons.visibility_outlined,
                                       ),
+                                      label: const Text('View'),
                                     ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: FilledButton.icon(
-                                        onPressed: status.toLowerCase() == 'started' ? null : () async {
-                                          try {
-                                            await DioClient.dio.post('/driver-trips/${trip['id']}/start');
-                                            if (mounted) {
-                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Trip started.')));
-                                              await _loadTrips();
-                                            }
-                                          } catch (_) {
-                                            if (mounted) {
-                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to start trip.')));
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      onPressed:
+                                          status.toLowerCase() != 'scheduled'
+                                          ? null
+                                          : () async {
+                                              try {
+                                                await DioClient.dio.post(
+                                                  '/driver-trips/${trip['id']}/start',
+                                                );
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                        'Trip started.',
+                                                      ),
+                                                    ),
+                                                  );
+                                                  await _loadTrips();
+                                                }
+                                              } catch (_) {
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                        'Unable to start trip.',
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                              }
+                                            },
+                                      icon: const Icon(Icons.play_arrow),
+                                      label: const Text('Start'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed:
+                                      status.toLowerCase() == 'completed' ||
+                                          status.toLowerCase() == 'cancelled'
+                                      ? null
+                                      : () async {
+                                          final tripId = trip['id'];
+                                          if (tripId is int) {
+                                            final confirmed =
+                                                await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (dialogContext) =>
+                                                      AlertDialog(
+                                                        title: const Text(
+                                                          'Delete trip?',
+                                                        ),
+                                                        content: const Text(
+                                                          'This action cannot be undone.',
+                                                        ),
+                                                        actions: [
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.of(
+                                                                  dialogContext,
+                                                                ).pop(false),
+                                                            child: const Text(
+                                                              'Cancel',
+                                                            ),
+                                                          ),
+                                                          FilledButton(
+                                                            onPressed: () =>
+                                                                Navigator.of(
+                                                                  dialogContext,
+                                                                ).pop(true),
+                                                            child: const Text(
+                                                              'Delete',
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                );
+
+                                            if (confirmed == true) {
+                                              await _deleteTrip(tripId);
                                             }
                                           }
                                         },
-                                        icon: const Icon(Icons.play_arrow),
-                                        label: const Text('Start'),
-                                      ),
-                                    ),
-                                  ],
+                                  icon: const Icon(Icons.delete_outline),
+                                  label: const Text('Delete'),
                                 ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () async {
-                                      final tripId = trip['id'];
-                                      if (tripId is int) {
-                                        final confirmed = await showDialog<bool>(
-                                          context: context,
-                                          builder: (dialogContext) => AlertDialog(
-                                            title: const Text('Delete trip?'),
-                                            content: const Text('This action cannot be undone.'),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () => Navigator.of(dialogContext).pop(false),
-                                                child: const Text('Cancel'),
-                                              ),
-                                              FilledButton(
-                                                onPressed: () => Navigator.of(dialogContext).pop(true),
-                                                child: const Text('Delete'),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-
-                                        if (confirmed == true) {
-                                          await _deleteTrip(tripId);
-                                        }
-                                      }
-                                    },
-                                    icon: const Icon(Icons.delete_outline),
-                                    label: const Text('Delete'),
-                                  ),
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ),
       ],
     );
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'scheduled':
+        return 'Scheduled';
+      case 'started':
+        return 'Started';
+      case 'completed':
+        return 'Completed';
+      default:
+        return status;
+    }
   }
 }

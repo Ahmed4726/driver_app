@@ -5,26 +5,43 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:driver_app/main.dart';
+import 'package:driver_app/features/bookings/data/driver_booking.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('parses a manifest and keeps the safe passenger fields', () {
+    final manifest = DriverManifest.fromJson({
+      'trip': {
+        'total_capacity': 4,
+        'booked_seats': 2,
+        'available_seats': 2,
+        'status': 'scheduled',
+      },
+      'bookings': [
+        {
+          'id': 1,
+          'booking_reference': 'TE-TEST',
+          'seats': 2,
+          'status': 'confirmed',
+          'passenger': {'name': 'Ahmed'},
+        },
+      ],
+    });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(manifest.trip.bookedSeats, 2);
+    expect(manifest.trip.availableSeats, 2);
+    expect(manifest.bookings.single.passengerName, 'Ahmed');
+    expect(driverBookingStatusLabel('no_show'), 'No-show');
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  test('malformed optional values use safe defaults', () {
+    final manifest = DriverManifest.fromJson({
+      'bookings': [{}],
+    });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(manifest.trip.totalCapacity, 0);
+    expect(manifest.bookings.single.seats, 0);
+    expect(manifest.bookings.single.passengerName, 'Passenger');
   });
 }
