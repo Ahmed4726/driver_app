@@ -1,9 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val mapsProperties = Properties()
+val mapsPropertiesFile = rootProject.file("maps-api-key.properties")
+if (!mapsPropertiesFile.isFile) {
+    error("Missing maps-api-key.properties. Run php scripts/generate-mobile-maps-config.php first.")
+}
+mapsPropertiesFile.inputStream().use(mapsProperties::load)
+val mapsApiKey = mapsProperties.getProperty("GOOGLE_MAPS_API_KEY")
+    ?: error("GOOGLE_MAPS_API_KEY is missing from maps-api-key.properties")
 
 android {
     namespace = "com.example.driver_app"
@@ -28,6 +39,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = mapsApiKey
     }
 
     buildTypes {

@@ -5,6 +5,7 @@ class DriverBooking {
     required this.seats,
     required this.status,
     required this.passengerName,
+    this.passengerPhone,
   });
 
   factory DriverBooking.fromJson(Map<String, dynamic> json) {
@@ -18,6 +19,7 @@ class DriverBooking {
       seats: _asInt(json['seats']) ?? 0,
       status: json['status']?.toString() ?? 'unknown',
       passengerName: passengerMap['name']?.toString() ?? 'Passenger',
+      passengerPhone: passengerMap['phone']?.toString(),
     );
   }
 
@@ -26,6 +28,7 @@ class DriverBooking {
   final int seats;
   final String status;
   final String passengerName;
+  final String? passengerPhone;
 
   static int? _asInt(dynamic value) {
     if (value is num) return value.toInt();

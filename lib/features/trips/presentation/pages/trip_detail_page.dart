@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as google_maps;
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' as latlong;
 
 import '../../../../core/api/dio_client.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -14,9 +14,14 @@ import '../../../bookings/presentation/pages/driver_manifest_page.dart';
 import '../../data/driver_trip_api.dart';
 
 class TripDetailPage extends StatefulWidget {
-  const TripDetailPage({super.key, required this.tripId});
+  const TripDetailPage({
+    super.key,
+    required this.tripId,
+    this.mapOnly = false,
+  });
 
   final int tripId;
+  final bool mapOnly;
 
   @override
   State<TripDetailPage> createState() => _TripDetailPageState();
@@ -31,10 +36,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
   List<Map<String, dynamic>> availableStopsToAdd = [];
   bool loadingAvailableStops = false;
   int? selectedStopToAddId;
-  LatLng? driverLocation;
+  google_maps.LatLng? driverLocation;
   StreamSubscription<Position>? _locationSubscription;
   final seatsController = TextEditingController();
-  final MapController _mapController = MapController();
+  google_maps.GoogleMapController? _mapController;
   final DriverTripApi _tripApi = const DriverTripApi();
 
   @override
@@ -75,7 +80,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
           if (latestLocation is Map &&
               latestLocation['latitude'] != null &&
               latestLocation['longitude'] != null) {
-            driverLocation = LatLng(
+            driverLocation = google_maps.LatLng(
               (latestLocation['latitude'] as num).toDouble(),
               (latestLocation['longitude'] as num).toDouble(),
             );
@@ -205,10 +210,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
         final currentLng = currentPoint['longitude'];
         if (currentLat is! num || currentLng is! num) continue;
 
-        final distance = const Distance().as(
-          LengthUnit.Kilometer,
-          LatLng(currentLat.toDouble(), currentLng.toDouble()),
-          LatLng(newLat.toDouble(), newLng.toDouble()),
+        final distance = const latlong.Distance().as(
+          latlong.LengthUnit.Kilometer,
+          latlong.LatLng(currentLat.toDouble(), currentLng.toDouble()),
+          latlong.LatLng(newLat.toDouble(), newLng.toDouble()),
         );
 
         if (bestDistance == null || distance < bestDistance) {
@@ -338,7 +343,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
       );
       if (!mounted) return;
       setState(
-        () => driverLocation = LatLng(current.latitude, current.longitude),
+        () => driverLocation = google_maps.LatLng(
+          current.latitude,
+          current.longitude,
+        ),
       );
       await _sendCurrentLocation(current.latitude, current.longitude);
 
@@ -357,7 +365,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
               return;
             }
 
-            final nextLocation = LatLng(position.latitude, position.longitude);
+            final nextLocation = google_maps.LatLng(
+              position.latitude,
+              position.longitude,
+            );
             if (mounted) {
               setState(() => driverLocation = nextLocation);
             }
@@ -482,15 +493,19 @@ class _TripDetailPageState extends State<TripDetailPage> {
 
     var total = 0;
     for (int i = 0; i < points.length - 1; i++) {
-      final from = LatLng(
+      final from = google_maps.LatLng(
         (points[i]['latitude'] as num).toDouble(),
         (points[i]['longitude'] as num).toDouble(),
       );
-      final to = LatLng(
+      final to = google_maps.LatLng(
         (points[i + 1]['latitude'] as num).toDouble(),
         (points[i + 1]['longitude'] as num).toDouble(),
       );
-      final distanceKm = const Distance().as(LengthUnit.Kilometer, from, to);
+      final distanceKm = const latlong.Distance().as(
+        latlong.LengthUnit.Kilometer,
+        latlong.LatLng(from.latitude, from.longitude),
+        latlong.LatLng(to.latitude, to.longitude),
+      );
       total += (distanceKm / 50 * 60).round();
     }
 
@@ -505,15 +520,19 @@ class _TripDetailPageState extends State<TripDetailPage> {
 
     final segmentMinutes = <int>[];
     for (int i = 0; i < points.length - 1; i++) {
-      final from = LatLng(
+      final from = google_maps.LatLng(
         (points[i]['latitude'] as num).toDouble(),
         (points[i]['longitude'] as num).toDouble(),
       );
-      final to = LatLng(
+      final to = google_maps.LatLng(
         (points[i + 1]['latitude'] as num).toDouble(),
         (points[i + 1]['longitude'] as num).toDouble(),
       );
-      final distanceKm = const Distance().as(LengthUnit.Kilometer, from, to);
+      final distanceKm = const latlong.Distance().as(
+        latlong.LengthUnit.Kilometer,
+        latlong.LatLng(from.latitude, from.longitude),
+        latlong.LatLng(to.latitude, to.longitude),
+      );
       segmentMinutes.add((distanceKm / 35 * 60).round());
     }
 
@@ -537,8 +556,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
     });
   }
 
-  List<Marker> _markers() {
-    final markers = <Marker>[];
+  Set<google_maps.Marker> _markers() {
+    final markers = <google_maps.Marker>{};
 
     for (final stop in stops.where((stop) {
       final lat = stop['latitude'];
@@ -548,40 +567,23 @@ class _TripDetailPageState extends State<TripDetailPage> {
       final lat = (stop['latitude'] as num).toDouble();
       final lng = (stop['longitude'] as num).toDouble();
       markers.add(
-        Marker(
-          point: LatLng(lat, lng),
-          width: 40,
-          height: 40,
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: const Icon(Icons.location_on, color: Colors.white, size: 20),
-          ),
+        google_maps.Marker(
+          markerId: google_maps.MarkerId('stop-$lat-$lng'),
+          position: google_maps.LatLng(lat, lng),
+          infoWindow: const google_maps.InfoWindow(title: 'Trip stop'),
         ),
       );
     }
 
     if (driverLocation != null) {
       markers.add(
-        Marker(
-          point: driverLocation!,
-          width: 40,
-          height: 40,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.green,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 3),
-            ),
-            child: const Icon(
-              Icons.directions_car,
-              color: Colors.white,
-              size: 18,
-            ),
+        google_maps.Marker(
+          markerId: const google_maps.MarkerId('driver'),
+          position: driverLocation!,
+          icon: google_maps.BitmapDescriptor.defaultMarkerWithHue(
+            google_maps.BitmapDescriptor.hueGreen,
           ),
+          infoWindow: const google_maps.InfoWindow(title: 'Driver location'),
         ),
       );
     }
@@ -589,7 +591,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
     return markers;
   }
 
-  List<LatLng> _routePoints() {
+  List<google_maps.LatLng> _routePoints() {
     return stops
         .where((stop) {
           final lat = stop['latitude'];
@@ -597,7 +599,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
           return lat != null && lng != null;
         })
         .map(
-          (stop) => LatLng(
+          (stop) => google_maps.LatLng(
             (stop['latitude'] as num).toDouble(),
             (stop['longitude'] as num).toDouble(),
           ),
@@ -605,7 +607,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
         .toList();
   }
 
-  LatLng? _center() {
+  google_maps.LatLng? _center() {
     final points = stops
         .where((stop) {
           final lat = stop['latitude'];
@@ -613,7 +615,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
           return lat != null && lng != null;
         })
         .map(
-          (stop) => LatLng(
+          (stop) => google_maps.LatLng(
             (stop['latitude'] as num).toDouble(),
             (stop['longitude'] as num).toDouble(),
           ),
@@ -628,7 +630,165 @@ class _TripDetailPageState extends State<TripDetailPage> {
       0,
       (sum, point) => sum + point.longitude,
     );
-    return LatLng(latSum / points.length, lngSum / points.length);
+    return google_maps.LatLng(latSum / points.length, lngSum / points.length);
+  }
+
+  Widget _buildMapOnlyPage(
+    BuildContext context, {
+    required google_maps.LatLng? center,
+    required List<Map<String, dynamic>> etaList,
+    required List<google_maps.LatLng> routePoints,
+    required bool isTripLive,
+  }) {
+    final title = trip?['from_city_name'] != null &&
+            trip?['to_city_name'] != null
+        ? '${trip!['from_city_name']} → ${trip!['to_city_name']}'
+        : 'Trip map';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title),
+        backgroundColor: AppColors.primary,
+        actions: [
+          Builder(
+            builder: (context) => IconButton(
+              tooltip: 'Upcoming stops and ETAs',
+              icon: const Icon(Icons.route_outlined),
+              onPressed: () => Scaffold.of(context).openEndDrawer(),
+            ),
+          ),
+        ],
+      ),
+      endDrawer: _buildRouteDrawer(etaList),
+      body: center == null
+          ? const Center(child: Text('No map coordinates available'))
+          : Stack(
+              children: [
+                Positioned.fill(
+                  child: google_maps.GoogleMap(
+                    initialCameraPosition: google_maps.CameraPosition(
+                      target: center,
+                      zoom: 11,
+                    ),
+                    onMapCreated: (controller) => _mapController = controller,
+                    markers: _markers(),
+                    polylines: routePoints.length > 1
+                        ? {
+                            google_maps.Polyline(
+                              polylineId: const google_maps.PolylineId(
+                                'trip-route',
+                              ),
+                              points: routePoints,
+                              color: AppColors.primary,
+                              width: 5,
+                            ),
+                          }
+                        : const {},
+                    myLocationEnabled: isTripLive,
+                    myLocationButtonEnabled: isTripLive,
+                    zoomControlsEnabled: false,
+                    compassEnabled: true,
+                  ),
+                ),
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  top: 16,
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isTripLive
+                                ? Icons.navigation_outlined
+                                : Icons.route_outlined,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              isTripLive
+                                  ? 'Trip in progress'
+                                  : 'Route overview',
+                              style: AppTextStyles.body.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${etaList.length} stops',
+                            style: AppTextStyles.subtitle,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildRouteDrawer(List<Map<String, dynamic>> etaList) {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 12, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('Upcoming stops', style: AppTextStyles.title),
+                  ),
+                  IconButton(
+                    tooltip: 'Close upcoming stops',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: etaList.isEmpty
+                  ? const Center(child: Text('No upcoming stops available.'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: etaList.length,
+                      separatorBuilder: (_, __) => const Divider(height: 20),
+                      itemBuilder: (context, index) {
+                        final stop = etaList[index];
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: CircleAvatar(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            child: Text('${index + 1}'),
+                          ),
+                          title: Text(
+                            stop['label']?.toString() ?? 'Upcoming stop',
+                            style: AppTextStyles.body.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'ETA ${stop['eta']} • next leg ${stop['nextEta']}',
+                            style: AppTextStyles.subtitle,
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -643,8 +803,22 @@ class _TripDetailPageState extends State<TripDetailPage> {
 
     if (isTripLive && driverLocation != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _mapController.move(driverLocation!, 13);
+        _mapController?.animateCamera(
+          google_maps.CameraUpdate.newLatLngZoom(driverLocation!, 13),
+        );
       });
+    }
+
+    if (widget.mapOnly) {
+      return loading
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          : _buildMapOnlyPage(
+              context,
+              center: center,
+              etaList: etaList,
+              routePoints: routePoints,
+              isTripLive: isTripLive,
+            );
     }
 
     return Scaffold(
@@ -656,6 +830,13 @@ class _TripDetailPageState extends State<TripDetailPage> {
         ),
         actions: isTripLive
             ? [
+                  Builder(
+                    builder: (context) => IconButton(
+                      tooltip: 'Route and upcoming stops',
+                      icon: const Icon(Icons.route_outlined),
+                      onPressed: () => Scaffold.of(context).openEndDrawer(),
+                    ),
+                  ),
                 const Padding(
                   padding: EdgeInsets.only(right: 12),
                   child: Center(
@@ -667,8 +848,74 @@ class _TripDetailPageState extends State<TripDetailPage> {
                   ),
                 ),
               ]
-            : null,
+            : [
+                Builder(
+                  builder: (context) => IconButton(
+                    tooltip: 'Route and upcoming stops',
+                    icon: const Icon(Icons.route_outlined),
+                    onPressed: () => Scaffold.of(context).openEndDrawer(),
+                  ),
+                ),
+              ],
         backgroundColor: AppColors.primary,
+      ),
+      endDrawer: Drawer(
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Route directions',
+                        style: AppTextStyles.title,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close route directions',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: etaList.isEmpty
+                    ? const Center(child: Text('No upcoming stops available.'))
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: etaList.length,
+                        separatorBuilder: (_, __) => const Divider(height: 20),
+                        itemBuilder: (context, index) {
+                          final stop = etaList[index];
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: CircleAvatar(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              child: Text('${index + 1}'),
+                            ),
+                            title: Text(
+                              stop['label']?.toString() ?? 'Upcoming stop',
+                              style: AppTextStyles.body.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: Text(
+                              'ETA ${stop['eta']} • next leg ${stop['nextEta']}',
+                              style: AppTextStyles.subtitle,
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
@@ -691,32 +938,29 @@ class _TripDetailPageState extends State<TripDetailPage> {
                           ? const Center(
                               child: Text('No map coordinates available'),
                             )
-                          : FlutterMap(
-                              mapController: _mapController,
-                              options: MapOptions(
-                                initialCenter:
-                                    center ?? const LatLng(24.8607, 67.0011),
-                                initialZoom: 10,
+                          : google_maps.GoogleMap(
+                              initialCameraPosition: google_maps.CameraPosition(
+                                target: center,
+                                zoom: 10,
                               ),
-                              children: [
-                                TileLayer(
-                                  urlTemplate:
-                                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                  userAgentPackageName:
-                                      'com.example.driver_app',
-                                ),
-                                if (routePoints.length > 1)
-                                  PolylineLayer(
-                                    polylines: [
-                                      Polyline(
+                              onMapCreated: (controller) =>
+                                  _mapController = controller,
+                              markers: _markers(),
+                              polylines: routePoints.length > 1
+                                  ? {
+                                      google_maps.Polyline(
+                                        polylineId:
+                                            const google_maps.PolylineId(
+                                              'trip-route',
+                                            ),
                                         points: routePoints,
                                         color: AppColors.primary,
-                                        strokeWidth: 4,
+                                        width: 4,
                                       ),
-                                    ],
-                                  ),
-                                MarkerLayer(markers: _markers()),
-                              ],
+                                    }
+                                  : const {},
+                              myLocationButtonEnabled: false,
+                              zoomControlsEnabled: true,
                             ),
                     ),
                     if (trip?['status']?.toString() == 'started') ...[

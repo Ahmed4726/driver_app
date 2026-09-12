@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../../core/api/dio_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../../../../core/routes/route_names.dart';
 import '../../../auth/data/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../auth/presentation/bloc/auth_event.dart';
 import '../../../auth/presentation/bloc/auth_state.dart';
 import '../../../vehicle/data/models/vehicle_model.dart';
 import '../../../vehicle/data/repositories/vehicle_repository.dart';
+import '../../../trips/presentation/pages/trip_detail_page.dart';
 import '../../../../core/di/service_locator.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -29,6 +29,9 @@ class _DashboardPageState extends State<DashboardPage> {
   bool loadingVehicle = true;
   bool approvedSuccessBannerVisible = false;
   bool approvedSuccessShown = false;
+  bool loadingActiveTrip = true;
+  Map<String, dynamic>? activeTrip;
+  String? activeTripError;
 
   String _greeting() {
     final hour = DateTime.now().hour;
@@ -41,6 +44,44 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     _loadCurrentVehicle();
+    _loadActiveTrip();
+  }
+
+  Future<void> _loadActiveTrip() async {
+    try {
+      final response = await DioClient.dio.get(
+        '/driver-trips',
+        queryParameters: const {'status': 'started'},
+      );
+      final data = response.data is Map ? response.data['data'] : null;
+      final trips = data is List ? data : const <dynamic>[];
+      if (!mounted) return;
+      setState(() {
+        activeTrip = trips.isNotEmpty && trips.first is Map
+            ? Map<String, dynamic>.from(trips.first as Map)
+            : null;
+        activeTripError = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        activeTrip = null;
+        activeTripError = 'Unable to load the active trip.';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() => loadingActiveTrip = false);
+    }
+  }
+
+  void _openActiveTrip() {
+    final tripId = int.tryParse(activeTrip?['id']?.toString() ?? '');
+    if (tripId == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TripDetailPage(tripId: tripId, mapOnly: true),
+      ),
+    );
   }
 
   Future<void> _loadCurrentVehicle() async {
@@ -134,27 +175,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildQuickAction(String title, IconData icon, VoidCallback onTap) {
-    return SizedBox(
-      width: 150,
-      child: FilledButton.icon(
-        icon: Icon(icon, size: 18),
-        label: Text(title),
-        onPressed: onTap,
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-          alignment: Alignment.centerLeft,
-        ),
-      ),
-    );
-  }
-
-  void _showComingSoon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Passenger screen coming soon.')),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -201,6 +221,7 @@ class _DashboardPageState extends State<DashboardPage> {
             return RefreshIndicator(
               onRefresh: () async {
                 context.read<AuthBloc>().add(CheckAuthentication());
+                await _loadActiveTrip();
                 await Future.delayed(const Duration(milliseconds: 400));
               },
               child: SingleChildScrollView(
@@ -308,6 +329,8 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                       ),
                     const SizedBox(height: 16),
+                    _buildActiveTripCard(),
+                    const SizedBox(height: 16),
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(20),
@@ -348,13 +371,6 @@ class _DashboardPageState extends State<DashboardPage> {
                             isApproved ? 'No active trip' : isPending ? 'Account under review' : 'Profile rejected',
                             style: AppTextStyles.body,
                           ),
-                          const SizedBox(height: 14),
-                          FilledButton(
-                            onPressed: isApproved
-                                ? () => context.go('${RouteNames.dashboard}?tab=1&mode=create')
-                                : null,
-                            child: const Text('Start New Trip'),
-                          ),
                         ],
                       ),
                     ),
@@ -374,21 +390,6 @@ class _DashboardPageState extends State<DashboardPage> {
                         Expanded(child: _buildSummaryStat('Pending Withdraw', 'Rs 0')),
                       ],
                     ),
-                    const SizedBox(height: 24),
-                    Text('Quick Actions', style: AppTextStyles.title),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        _buildQuickAction('Start Trip', Icons.play_arrow, () => context.go('${RouteNames.dashboard}?tab=1&mode=create')),
-                        _buildQuickAction('Trips', Icons.list_alt, () => context.go(RouteNames.trips)),
-                        _buildQuickAction('Passengers', Icons.people, () => _showComingSoon(context)),
-                        _buildQuickAction('Vehicle', Icons.directions_car, () => context.go(RouteNames.vehicleRegistration)),
-                        _buildQuickAction('Earnings', Icons.attach_money, () => context.go(RouteNames.earnings)),
-                        _buildQuickAction('Profile', Icons.person, () => context.go(RouteNames.profile)),
-                      ],
-                    ),
                   ],
                 ),
               ),
@@ -406,6 +407,79 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildActiveTripCard() {
+    if (loadingActiveTrip) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    if (activeTrip == null) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Icon(Icons.route_outlined, color: AppColors.textSecondary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  activeTripError ?? 'No active trip right now.',
+                  style: AppTextStyles.body,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final from = activeTrip!['from_city_name']?.toString() ?? 'Origin';
+    final to = activeTrip!['to_city_name']?.toString() ?? 'Destination';
+    final tripId = activeTrip!['id']?.toString() ?? '';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.directions_bus, color: AppColors.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('Active trip', style: AppTextStyles.title),
+                ),
+                Text('#$tripId', style: AppTextStyles.subtitle),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text('$from → $to', style: AppTextStyles.body),
+            if (activeTrip!['departure_time'] != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Departure: ${activeTrip!['departure_time']}',
+                style: AppTextStyles.subtitle,
+              ),
+            ],
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _openActiveTrip,
+                icon: const Icon(Icons.map_outlined),
+                label: const Text('View trip map'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

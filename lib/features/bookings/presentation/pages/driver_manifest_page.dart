@@ -1,9 +1,11 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/api/dio_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../chat/presentation/pages/chat_page.dart';
 import '../../data/driver_booking.dart';
 import '../../data/driver_booking_api.dart';
 
@@ -78,6 +80,18 @@ class _DriverManifestPageState extends State<DriverManifestPage> {
       return 'You are not authorized to view this trip manifest.';
     }
     return 'Unable to load the passenger manifest. Please try again.';
+  }
+
+  Future<void> _openChat(DriverBooking booking) async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatPage(
+          booking: booking,
+          tripId: widget.tripId,
+        ),
+      ),
+    );
   }
 
   Future<void> _confirmBoarding(DriverBooking booking) async {
@@ -338,6 +352,7 @@ class _DriverManifestPageState extends State<DriverManifestPage> {
                       booking.status == 'confirmed'
                   ? () => _confirmNoShow(booking)
                   : null,
+              onMessage: () => _openChat(booking),
             ),
           ),
       ],
@@ -415,6 +430,7 @@ class _BookingCard extends StatelessWidget {
     required this.onBoard,
     required this.noShowing,
     required this.onNoShow,
+    required this.onMessage,
   });
 
   final DriverBooking booking;
@@ -422,58 +438,130 @@ class _BookingCard extends StatelessWidget {
   final VoidCallback? onBoard;
   final bool noShowing;
   final VoidCallback? onNoShow;
+  final VoidCallback onMessage;
 
   @override
   Widget build(BuildContext context) {
+    final hasPhone = booking.passengerPhone != null && booking.passengerPhone!.trim().isNotEmpty;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        leading: const CircleAvatar(child: Icon(Icons.person_outline)),
-        title: Text(booking.passengerName),
-        subtitle: Text(
-          '${booking.reference}\n${booking.seats} seat${booking.seats == 1 ? '' : 's'}',
-        ),
-        isThreeLine: true,
-        trailing: onBoard == null && onNoShow == null
-            ? Text(
-                driverBookingStatusLabel(booking.status),
-                style: AppTextStyles.body.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: booking.status == 'confirmed'
-                      ? AppColors.success
-                      : AppColors.textSecondary,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const CircleAvatar(child: Icon(Icons.person_outline)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(booking.passengerName, style: AppTextStyles.title),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${booking.reference}\n${booking.seats} seat${booking.seats == 1 ? '' : 's'}',
+                        style: AppTextStyles.body,
+                      ),
+                      if (hasPhone) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          booking.passengerPhone!,
+                          style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
+                if (onBoard == null && onNoShow == null)
+                  Text(
+                    driverBookingStatusLabel(booking.status),
+                    style: AppTextStyles.body.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: booking.status == 'confirmed'
+                          ? AppColors.success
+                          : AppColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
+            if (hasPhone) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => _launchPhoneCall(context, booking.passengerPhone!),
+                      icon: const Icon(Icons.call_outlined),
+                      label: const Text('Call'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onMessage,
+                      icon: const Icon(Icons.message_outlined),
+                      label: const Text('Message'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (onBoard != null || onNoShow != null) ...[
+              const SizedBox(height: 12),
+              Row(
                 children: [
                   if (onBoard != null)
-                    FilledButton(
-                      onPressed: boarding ? null : onBoard,
-                      child: boarding
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Board'),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: boarding ? null : onBoard,
+                        child: boarding
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Board'),
+                      ),
                     ),
+                  if (onBoard != null && onNoShow != null)
+                    const SizedBox(width: 8),
                   if (onNoShow != null)
-                    TextButton(
-                      onPressed: noShowing ? null : onNoShow,
-                      child: noShowing
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Mark no-show'),
+                    Expanded(
+                      child: TextButton(
+                        onPressed: noShowing ? null : onNoShow,
+                        child: noShowing
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Mark no-show'),
+                      ),
                     ),
                 ],
               ),
+            ],
+          ],
+        ),
       ),
     );
   }
+
+  Future<void> _launchPhoneCall(BuildContext context, String phoneNumber) async {
+    final uri = Uri(scheme: 'tel', path: phoneNumber.trim());
+    if (!await launchUrl(uri)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the phone dialer.')),
+        );
+      }
+    }
+  }
+
 }
 
 class _EmptyManifest extends StatelessWidget {

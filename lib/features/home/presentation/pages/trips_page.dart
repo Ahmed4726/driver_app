@@ -203,11 +203,6 @@ class _TripsPageState extends State<TripsPage> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Status: ${_statusLabel(status)}',
-                                style: AppTextStyles.body,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
                                 'Total capacity: ${trip['total_seats'] ?? '-'}',
                                 style: AppTextStyles.body,
                               ),
@@ -223,6 +218,7 @@ class _TripsPageState extends State<TripsPage> {
                                               tripId: trip['id'] is int
                                                   ? trip['id'] as int
                                                   : 0,
+                                              mapOnly: true,
                                             ),
                                           ),
                                         );
@@ -342,16 +338,4 @@ class _TripsPageState extends State<TripsPage> {
     );
   }
 
-  String _statusLabel(String status) {
-    switch (status) {
-      case 'scheduled':
-        return 'Scheduled';
-      case 'started':
-        return 'Started';
-      case 'completed':
-        return 'Completed';
-      default:
-        return status;
-    }
-  }
 }
